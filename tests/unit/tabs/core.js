@@ -82,6 +82,37 @@ QUnit.test( "non-tab list items", function( assert ) {
 		"first actual tab is active" );
 } );
 
+QUnit.test( "ID escaping backslashes", function( assert ) {
+	assert.expect( 5 );
+
+	location.hash = "#fragment\b-2";
+
+	var element = $( "#tabs1" )
+		.find( "a[href='#fragment-2']" )
+			.attr( "href", "#fragment\b-2" )
+		.end()
+		.find( "#fragment-2" )
+			.attr( "id", "fragment\b-2" )
+		.end()
+		.tabs();
+	var tabs = element.find( ".ui-tabs-nav li" );
+	var anchors = tabs.find( ".ui-tabs-anchor" );
+	var panels = element.find( ".ui-tabs-panel" );
+
+	assert.strictEqual( element.tabs( "option", "active" ), 1,
+		"should set the active option" );
+
+	assert.strictEqual( anchors.length, 3, "should decorate all anchors" );
+	assert.strictEqual( panels.length, 3, "should decorate all panels" );
+
+	assert.strictEqual( panels.eq( 1 ).attr( "aria-labelledby" ), anchors.eq( 1 ).attr( "id" ),
+		"panel 2 aria-labelledby equals anchor 2 id" );
+	assert.strictEqual( tabs.eq( 1 ).attr( "aria-controls" ), "fragment\b-2",
+		"tab 2 aria-controls" );
+
+	location.hash = "";
+} );
+
 QUnit.test( "aria-controls", function( assert ) {
 	assert.expect( 7 );
 	var element = $( "#tabs1" ).tabs(),
@@ -661,6 +692,83 @@ QUnit.test( "#4033 - IE expands hash to full url and misinterprets tab as ajax",
 
 	assert.equal( element.find( ".ui-tabs-nav li" ).attr( "aria-controls" ), "tab", "aria-contorls attribute is correct" );
 	state( assert, element, 1 );
+} );
+
+( function() {
+	function getVerifyTab( assert, element ) {
+		return function verifyTab( index ) {
+			assert.strictEqual(
+				element.tabs( "option", "active" ),
+				index,
+				"should set the active option to " + index );
+			assert.strictEqual(
+				element.find( "[role='tabpanel']:visible" ).text().trim(),
+				"Tab " + ( index + 1 ),
+				"should set the panel to 'Tab " + ( index + 1 ) + "'" );
+		};
+	}
+
+	QUnit.test( "href encoding/decoding (gh-2344)", function( assert ) {
+		assert.expect( 12 );
+
+		location.hash = "#tabs-2";
+
+		var i,
+			element = $( "#tabs10" ).tabs(),
+			tabLinks = element.find( "> ul a" ),
+			verifyTab = getVerifyTab( assert, element );
+
+		for ( i = 0; i < tabLinks.length; i++ ) {
+			tabLinks.eq( i ).trigger( "click" );
+			verifyTab( i );
+		}
+
+		location.hash = "";
+	} );
+
+	QUnit.test( "href encoding/decoding on init (gh-2344)", function( assert ) {
+		assert.expect( 12 );
+
+		var i,
+			element = $( "#tabs10" ),
+			tabLinks = element.find( "> ul a" ),
+			verifyTab = getVerifyTab( assert, element );
+
+		for ( i = 0; i < tabLinks.length; i++ ) {
+			location.hash = tabLinks.eq( i ).prop( "hash" );
+			element.tabs();
+			verifyTab( i );
+			element.tabs( "destroy" );
+		}
+
+		location.hash = "";
+	} );
+} )();
+
+// Seal: decoding a malformed or non-UTF-8 hash must not throw (#9518)
+QUnit.test( "malformed percent-encoding in hashes does not throw", function( assert ) {
+	assert.expect( 4 );
+
+	location.hash = "#100%done";
+	var element = $( "#tabs1" ).tabs();
+	assert.strictEqual( element.tabs( "option", "active" ), 0,
+		"malformed location.hash falls back to the first tab" );
+	element.tabs( "destroy" );
+
+	location.hash = "#caf%E9";
+	element = $( "#tabs1" ).tabs( { active: 1 } );
+	assert.strictEqual( element.tabs( "option", "active" ), 1,
+		"non-UTF-8 location.hash leaves an explicit active option alone" );
+	element.tabs( "destroy" );
+	location.hash = "";
+
+	element = $( "<div><ul><li><a href='#50%zz'>A</a></li></ul></div>" )
+		.appendTo( "#qunit-fixture" )
+		.tabs();
+	assert.strictEqual( element.find( ".ui-tabs-panel" ).length, 0,
+		"no panel matches a local href with a malformed hash, as in 1.12.1" );
+	assert.strictEqual( element.find( ".ui-tabs-nav li" ).attr( "aria-controls" ), "50%zz",
+		"the tab keeps the raw id in aria-controls" );
 } );
 
 } );

@@ -36,6 +36,59 @@
 	}
 }( function( $ ) {
 
+// Seal: CSS.escape is used where the browser has it. IE and PhantomJS, both supported
+// by jQuery UI 1.12, lack it, so fall back to the CSSOM "serialize an identifier"
+// algorithm (https://drafts.csswg.org/cssom/#serialize-an-identifier).
+function cssEscape( value ) {
+	if ( window.CSS && typeof window.CSS.escape === "function" ) {
+		return window.CSS.escape( value );
+	}
+
+	var string = String( value ),
+		length = string.length,
+		index = -1,
+		codeUnit,
+		result = "",
+		firstCodeUnit = string.charCodeAt( 0 );
+
+	if ( length === 1 && firstCodeUnit === 0x002D ) {
+		return "\\" + string;
+	}
+
+	while ( ++index < length ) {
+		codeUnit = string.charCodeAt( index );
+
+		if ( codeUnit === 0x0000 ) {
+			result += "\uFFFD";
+			continue;
+		}
+
+		if (
+			( codeUnit >= 0x0001 && codeUnit <= 0x001F ) || codeUnit === 0x007F ||
+			( index === 0 && codeUnit >= 0x0030 && codeUnit <= 0x0039 ) ||
+			( index === 1 && codeUnit >= 0x0030 && codeUnit <= 0x0039 &&
+				firstCodeUnit === 0x002D )
+		) {
+			result += "\\" + codeUnit.toString( 16 ) + " ";
+			continue;
+		}
+
+		if (
+			codeUnit >= 0x0080 || codeUnit === 0x002D || codeUnit === 0x005F ||
+			( codeUnit >= 0x0030 && codeUnit <= 0x0039 ) ||
+			( codeUnit >= 0x0041 && codeUnit <= 0x005A ) ||
+			( codeUnit >= 0x0061 && codeUnit <= 0x007A )
+		) {
+			result += string.charAt( index );
+			continue;
+		}
+
+		result += "\\" + string.charAt( index );
+	}
+
+	return result;
+}
+
 $.widget( "ui.tabs", {
 	version: "1.12.1",
 	delay: 300,
@@ -120,7 +173,14 @@ $.widget( "ui.tabs", {
 	_initialActive: function() {
 		var active = this.options.active,
 			collapsible = this.options.collapsible,
-			locationHash = location.hash.substring( 1 );
+			locationHash = location.hash.substring( 1 ),
+			locationHashDecoded = locationHash;
+
+		// Seal: decoding throws on malformed or non-UTF-8 percent sequences (#9518),
+		// so keep the raw hash in that case, as 1.12.1 did.
+		try {
+			locationHashDecoded = decodeURIComponent( locationHash );
+		} catch ( error ) {}
 
 		if ( active === null ) {
 
@@ -132,6 +192,18 @@ $.widget( "ui.tabs", {
 						return false;
 					}
 				} );
+
+				// If not found, decode the hash & try again.
+				// See the comment in `_processTabs` under the `_isLocal` check
+				// for more information.
+				if ( active === null ) {
+					this.tabs.each( function( i, tab ) {
+						if ( $( tab ).attr( "aria-controls" ) === locationHashDecoded ) {
+							active = i;
+							return false;
+						}
+					} );
+				}
 			}
 
 			// Check for a tab marked active via a class
@@ -311,8 +383,15 @@ $.widget( "ui.tabs", {
 		}
 	},
 
+	// Seal: kept for callers of this private method; it now escapes every character
+	// (including backslashes) through cssEscape instead of a fixed character list.
 	_sanitizeSelector: function( hash ) {
-		return hash ? hash.replace( /[!"$%&'()*+,.\/:;<=>?@\[\]\^`{|}~]/g, "\\$&" ) : "";
+		if ( !hash ) {
+			return "";
+		}
+		return hash.charAt( 0 ) === "#" ?
+			"#" + cssEscape( hash.substring( 1 ) ) :
+			cssEscape( hash );
 	},
 
 	refresh: function() {
@@ -446,9 +525,28 @@ $.widget( "ui.tabs", {
 
 			// Inline tab
 			if ( that._isLocal( anchor ) ) {
+
+				// The "scrolling to a fragment" section of the HTML spec:
+				// https://html.spec.whatwg.org/#scrolling-to-a-fragment
+				// uses a concept of document's indicated part:
+				// https://html.spec.whatwg.org/#the-indicated-part-of-the-document
+				// Slightly below there's an algorithm to compute the indicated
+				// part:
+				// https://html.spec.whatwg.org/#the-indicated-part-of-the-document
+				// First, the algorithm tries the hash as-is, without decoding.
+				// Then, if one is not found, the same is attempted with a decoded
+				// hash. Replicate this logic.
 				selector = anchor.hash;
 				panelId = selector.substring( 1 );
-				panel = that.element.find( that._sanitizeSelector( selector ) );
+				panel = that.element.find( "#" + cssEscape( panelId ) );
+				if ( !panel.length ) {
+
+					// Seal: keep the raw id if decoding throws (#9518), as 1.12.1 did.
+					try {
+						panelId = decodeURIComponent( panelId );
+						panel = that.element.find( "#" + cssEscape( panelId ) );
+					} catch ( error ) {}
+				}
 
 			// remote tab
 			} else {
@@ -902,7 +1000,7 @@ $.widget( "ui.tabs", {
 
 	_getPanelForTab: function( tab ) {
 		var id = $( tab ).attr( "aria-controls" );
-		return this.element.find( this._sanitizeSelector( "#" + id ) );
+		return this.element.find( "#" + cssEscape( id ) );
 	}
 } );
 
