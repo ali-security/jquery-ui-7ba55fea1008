@@ -1,5 +1,9 @@
 <?php
 
+function cleanCallback( $callback ) {
+	return preg_replace( '/[^a-z0-9_]/i', '', $callback );
+}
+
 sleep( 2 );
 // no term passed - just exit early with no response
 if (empty($_GET['term'])) exit ;
@@ -589,7 +593,7 @@ if ($_GET["callback"]) {
 	// Escape special characters to avoid XSS attacks via direct loads of this
 	// page with a callback that contains HTML. This is a lot easier than validating
 	// the callback name.
-	$output = htmlspecialchars($_GET["callback"]) . "($output);";
+	$output = htmlspecialchars(cleanCallback($_GET["callback"])) . "($output);";
 }
 
 echo $output;
